@@ -1,15 +1,18 @@
-#https://goo.su/9C9F36g
+#https://goo.su/6j41m
 set -uo pipefail
 trap 's=$?; echo "$0: Error on line "$LINENO": $BASH_COMMAND"; exit $s' ERR
+
+REPO_URL="https://s3.eu-west-2.amazonaws.com/mdaffin-arch/repo/x86_64"
+reflector --country Russia,Belarus -f 12 -l 10 -n 12 \
+--save /etc/pacman.d/mirrorlist --verbose
 
 MIRRORLIST_URL="https://archlinux.org/mirrorlist/?country=RU&protocol=http&protocol=https&ip_version=4"
 
 pacman -Sy --noconfirm pacman-contrib dialog
 
-#echo "Обновление зеркал"
-#curl -s "$MIRRORLIST_URL" | \
-#    sed -e 's/^#Server/Server/' -e '/^#/d' | \
-#    rankmirrors -n 5 - > /etc/pacman.d/mirrorlist
+curl -s "$MIRRORLIST_URL" | \
+    sed -e 's/^#Server/Server/' -e '/^#/d' | \
+    rankmirrors -n 5 - > /etc/pacman.d/mirrorlist
 
 echo "Разбивка диска"
 devicelist=$(lsblk -dplnx size -o name,size | grep -Ev "boot|rpmb|loop" | tac)
