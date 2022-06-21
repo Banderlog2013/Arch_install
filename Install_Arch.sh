@@ -1,18 +1,24 @@
-#https://goo.su/6j41m
+#!/bin/bash
+# WARNING: this script will destroy data on the selected disk.
+# This script can be run by executing the following:
+#   curl -sL https://git.io/vAoV8 | bash
 set -uo pipefail
 trap 's=$?; echo "$0: Error on line "$LINENO": $BASH_COMMAND"; exit $s' ERR
 
 REPO_URL="https://s3.eu-west-2.amazonaws.com/mdaffin-arch/repo/x86_64"
-reflector --country Russia,Belarus -f 12 -l 10 -n 12 \
---save /etc/pacman.d/mirrorlist --verbose
-
-MIRRORLIST_URL="https://archlinux.org/mirrorlist/?country=RU&protocol=http&protocol=https&ip_version=4"
+MIRRORLIST_URL="https://archlinux.org/mirrorlist/?country=GB&protocol=https&use_mirror_status=on"
 
 pacman -Sy --noconfirm pacman-contrib dialog
 
+echo "Updating mirror list"
 curl -s "$MIRRORLIST_URL" | \
     sed -e 's/^#Server/Server/' -e '/^#/d' | \
     rankmirrors -n 5 - > /etc/pacman.d/mirrorlist
+
+### Get infomation from user ###
+hostname=$(dialog --stdout --inputbox "Enter hostname" 0 0) || exit 1
+clear
+: ${hostname:?"hostname cannot be empty"}
 
 user=$(dialog --stdout --inputbox "Enter admin username" 0 0) || exit 1
 clear
@@ -29,26 +35,33 @@ devicelist=$(lsblk -dplnx size -o name,size | grep -Ev "boot|rpmb|loop" | tac)
 device=$(dialog --stdout --menu "Select installtion disk" 0 0 0 ${devicelist}) || exit 1
 clear
 
-parted --script "${device}" -- mklabel gpt \
-  mkpart ESP fat32 1Mib 512MiB \
-  set 1 boot on \
-  mkpart primary btrfs 512 100%
-
 ### Set up logging ###
 exec 1> >(tee "stdout.log")
 exec 2> >(tee "stderr.log")
 
+timedatectl set-ntp true
+
+### Setup the disk and partitions ### 
+
+parted --script "${device}" -- mklabel gpt \
+  mkpart ESP fat32 1Mib 512MiB \
+  set 1 boot on \
+  mkpart primary btrfs 100%
+
+# Simple globbing was not enough as on one device I needed to match /dev/mmcblk0p1 
+# but not /dev/mmcblk0boot1 while being able to match /dev/sda1 on other devices.
 part_boot="$(ls ${device}* | grep -E "^${device}p?1$")"
 part_root="$(ls ${device}* | grep -E "^${device}p?2$")"
 
 wipefs "${part_boot}"
 wipefs "${part_root}"
 
-echo "Форматирование"
 mkfs.vfat -F32 "${part_boot}"
 mkfs.btrfs -f "${part_root}"
 
-echo "Создание подразделов"
+mkfs.vfat -F32 "${part_boot}"
+mkfs.btrfs -f "${part_root}"
+
 mount "${part_root}" /mnt
 btrfs su cr /mnt/@
 btrfs su cr /mnt/@home
@@ -65,42 +78,9 @@ mount -o noatime,compress=zstd:2,space_cache=v2,discard=async,subvol=@snapshots 
 
 mount "${part_boot}" /mnt/boot/efi
 
-echo "Установка"
-
-pacstrap /mnt base base-devel linux-zen linux-firmware nano btrfs-progs networkmanager network-manager-applet grub grub-btrfs efibootmgr linux-headers reflector rsync mtools net-tools os-prober dosfstools git snapper xdg-user-dirs
-
-echo "генерация fstab"
-genfstab -t PARTUUID /mnt >> /mnt/etc/fstab
-
-echo "chroot"
-arch-chroot /mnt
-
-echo "Установка часовой зоны и синхронизация часов"
-ln -sf /usr/share/zoneinfo/Russia/Moscow /etc/localtime
-hwclock --systohc UTC
-timedatectl set-ntp true
-
-echo "Локализация"
-echo "LANG=ru_RU.UTF-8" > /mnt/etc/locale.conf
-
-touch /etc/vconsole.conf
-echo "KEYMAP=ru" > /etc/vconsole.conf
-echo "FONT=cyr-sun16" > /etc/vconsole.conf
-locale-gen
-
-echo "${hostname}" > /mnt/etc/hostname
-echo 127.0.0.1  > /mnt/etc/hosts
-echo 127.0.1.1  "${hostname}" > /mnt/etc/hosts
-
-grub-install --target=x86_64-efi \
---efi-directory=/boot/efi \
---bootloader-id=GRUB
-
-grub-mkconfig -o \
-/boot/grub/grub.cfg
-
-pacman -S xorg sddm plasma kde-applications firefox
-systemctl enable sddm
-systemctl enable NetworkManager
-
-echo "FINISH ... and REBOOT"
+pacstrap /mnt base base-devel linux \
+linux-firmware vim btrfs-progs \
+networkmanager network-manager-applet \
+grub grub-btrfs efibootmgr linux-headers \
+reflector rsync mtools net-tools os-prober dosfstools \
+git snapper xdg-user-dirs
