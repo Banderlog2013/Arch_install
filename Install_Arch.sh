@@ -34,6 +34,10 @@ parted --script "${device}" -- mklabel gpt \
   set 1 boot on \
   mkpart primary btrfs 512 100%
 
+### Set up logging ###
+exec 1> >(tee "stdout.log")
+exec 2> >(tee "stderr.log")
+
 part_boot="$(ls ${device}* | grep -E "^${device}p?1$")"
 part_root="$(ls ${device}* | grep -E "^${device}p?2$")"
 
